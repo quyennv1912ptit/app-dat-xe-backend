@@ -24,6 +24,7 @@ repositories {
 }
 
 dependencies {
+	implementation("com.uber:h3:4.5.0")
 	implementation("org.springframework.boot:spring-boot-starter-webflux")
 	implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
