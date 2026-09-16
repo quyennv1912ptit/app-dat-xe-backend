@@ -27,7 +27,7 @@ class TomtomIncidentApiService (
                 .build()
             }
             .header("TomTom-Api-Key", apiKey)
-            .header("Attributes", "incidents(type,geometry(type,coordinates),properties(iconCategory))")
+            .header("Attributes", "incidents(type,geometry(type,coordinates),properties(id, iconCategory,magnitudeOfDelay, from, to, events(description)))")
             .retrieve()
             .awaitBody<IncidentApiResponse>()
     }

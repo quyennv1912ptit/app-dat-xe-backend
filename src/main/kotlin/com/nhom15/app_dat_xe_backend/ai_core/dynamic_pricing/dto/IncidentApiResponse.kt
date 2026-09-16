@@ -30,7 +30,16 @@ data class IncidentApiResponse(
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class Properties (
-        val iconCategory: String
+        val id: String,
+        val iconCategory: String,
+        val magnitudeOfDelay: String,
+        val from: String,
+        val to: String,
+        val events: List<Event>
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class Event (
+        val description: String
+    )
 }

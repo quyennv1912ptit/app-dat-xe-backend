@@ -35,11 +35,13 @@
     - ``condition``: "Rain"
     - ``surge_factor``: 0.2
 - ``surge:macro:hexId``: Hệ số tăng giá tại ô
-- ``incident:micro:hexId``: Sự cố giao thông
-    - ``severity``: "MAJOR"
-    - ``reason``: "Tai nạn giao thông"
-    - ``surge_factor``: 0.3
-
+- ``hex_incidents:hexId``: Mảng Id các sự cố xuất hiện tại ô
+- ``incident_detail:Id``: Thông tin chi tiết của sự cố
+    - iconCategory
+    - from
+    - to
+    - magnitude
+    - description
 ---
 
 ## Các API bên ngoài
