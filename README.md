@@ -24,24 +24,21 @@
 - ``device_fingerprints``
 ---
 ### Redis
-- ``driver:location:driverId``
-    - lat
-    - lon
-    - heading
-    - status
-- ``supply:macro:hexId``: Các tài xế đang trống trong ô
-- ``demand:macro:hexId``: Khách đang tìm xe trong ô
-- ``weather:macro:hexId``: thời tiết tại ô đó
-    - ``condition``: "Rain"
-    - ``surge_factor``: 0.2
-- ``surge:macro:hexId``: Hệ số tăng giá tại ô
-- ``hex_incidents:hexId``: Mảng Id các sự cố xuất hiện tại ô
-- ``incident_detail:Id``: Thông tin chi tiết của sự cố
-    - iconCategory
-    - from
-    - to
-    - magnitude
-    - description
+- ``driver:state`` HASH: driverId - JSON: {lat, lon, status, updatedAt}
+
+- ``driver:current_hex`` HASH : driverId - hexId
+
+- ``supply:hexId`` ZSET : driverId - timestamp
+
+- ``demand:hexId`` ZSET : customerId - timestamp
+
+- ``weather:macro`` HASH : hexId - JSON: {"condition": "Rain", "surge_factor": "0.2", "description": "moderate rain"}
+
+- ``surge:macro`` HASH : hexId - Float: 1.5
+
+- ``hex_incidents`` HASH : hexId - JSON: {"incidentIds": ["TTI-6804d47b-d6c6-435d-847f-e8c860a43716-TTR85749350744344000"]}
+
+- ``incident_detail`` HASH : incidentId - JSON: {"iconCategory": "jam", "magnitude": "minor", "from": "Nội Bài", "to": "Phố Kim Anh / Đường Kim Anh", "description": "Slow traffic"}
 ---
 
 ## Các API bên ngoài

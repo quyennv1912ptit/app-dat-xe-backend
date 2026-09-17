@@ -9,6 +9,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.data.redis.core.script.DefaultRedisScript
+import org.springframework.data.redis.core.script.RedisScript
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 
@@ -21,6 +23,40 @@ class CronJob(
     private val incidentApiService: TomtomIncidentApiService,
     private val objectMapper: JsonMapper
 ) {
+
+    companion object {
+        private const val HASH_SET_WITH_TTL_LUA = """
+            local hashKey = KEYS[1]
+            local ttl = tonumber(ARGV[1])
+            redis.call('HSET', hashKey, unpack(ARGV, 2, #ARGV))
+            redis.call('EXPIRE', hashKey, ttl)
+            return 1
+        """
+
+        private val hashSetWithTtlScript: RedisScript<Long> =
+            DefaultRedisScript(HASH_SET_WITH_TTL_LUA.trimIndent(), Long::class.java)
+
+        const val WEATHER_HASH_KEY = "weather:macro"
+        const val INCIDENT_DETAIL_HASH_KEY = "incident_detail"
+        const val HEX_INCIDENTS_HASH_KEY = "hex_incidents"
+    }
+
+    private fun hashSetWithTtl(hashKey: String, fields: Map<String, String>, ttlSeconds: Long) {
+        if (fields.isEmpty()) return
+
+        val entries = fields.entries.toList()
+        for (chunk in entries.chunked(2000)) {
+            val args = ArrayList<String>(1 + chunk.size * 2)
+            args.add(ttlSeconds.toString())
+            chunk.forEach { entry ->
+                args.add(entry.key)
+                args.add(entry.value)
+            }
+
+            redisTemplate.execute(hashSetWithTtlScript, listOf(hashKey), *args.toTypedArray())
+        }
+    }
+
     @Scheduled(initialDelay = 0, fixedRate = 900000) // 15 phút
     fun fetchAndStoreWeather() {
         val coordinates = locationConfig.weatherFetchCoordinates
@@ -40,20 +76,14 @@ class CronJob(
                         val centerHexId = h3Service.getMacroHexId(lat, lon)
                         val surroundingHexes = h3Service.findNeighborHexIds(centerHexId, 5)
 
-                        val expirationTime = System.currentTimeMillis() + 1200000L
                         val weatherData = mapOf(
                             "condition" to currentCondition,
                             "surge_factor" to surgeFactor,
-                            "description" to currentDescription,
-                            "expiresAt" to expirationTime
+                            "description" to currentDescription
                         )
                         val weatherJson = objectMapper.writeValueAsString(weatherData)
 
-                        val resultList = mutableListOf<Pair<String, String>>()
-                        surroundingHexes.forEach { hexId ->
-                            resultList.add(Pair("weather:macro:$hexId", weatherJson))
-                        }
-                        resultList
+                        surroundingHexes.map { hexId -> Pair(hexId, weatherJson) }
                     } catch (e: Exception) {
                         println("Error fetching weather: ${e.message}")
                         emptyList()
@@ -61,16 +91,12 @@ class CronJob(
                 }
             }
 
-            val allUpdates = mutableMapOf<String, String>()
+            val allFields = mutableMapOf<String, String>()
             deferredResults.awaitAll().forEach { pairList ->
-                pairList.forEach { pair ->
-                    allUpdates[pair.first] = pair.second
-                }
+                pairList.forEach { (hexId, json) -> allFields[hexId] = json }
             }
 
-            if (allUpdates.isNotEmpty()) {
-                redisTemplate.opsForValue().multiSet(allUpdates)
-            }
+            hashSetWithTtl(WEATHER_HASH_KEY, allFields, ttlSeconds = 1200)
         }
     }
 
@@ -81,10 +107,8 @@ class CronJob(
                 val res = incidentApiService.getCurrentIncidents(20.9000, 105.7000, 21.2500, 105.9500)
                 val incidents = res.incidents
 
-                val allUpdates = mutableMapOf<String, String>()
+                val incidentDetailFields = mutableMapOf<String, String>()
                 val hexToIncidentsMap = mutableMapOf<String, MutableSet<String>>()
-
-                val expirationTime = System.currentTimeMillis() + 900000L
 
                 for (incident in incidents) {
                     val properties = incident.properties
@@ -98,11 +122,10 @@ class CronJob(
                         "magnitude" to properties.magnitudeOfDelay,
                         "from" to properties.from,
                         "to" to properties.to,
-                        "description" to description,
-                        "expiresAt" to expirationTime
+                        "description" to description
                     )
 
-                    allUpdates["incident_detail:$incidentId"] = objectMapper.writeValueAsString(incidentDetail)
+                    incidentDetailFields[incidentId] = objectMapper.writeValueAsString(incidentDetail)
 
                     val coordinates = geometry.coordinates
                     val modifiedCoordinates = coordinates.map { point ->
@@ -112,22 +135,18 @@ class CronJob(
                     val hexIds = h3Service.getRouteMicroHexIds(modifiedCoordinates)
 
                     for (hexId in hexIds) {
-                        val hexKey = "hex_incidents:$hexId"
-                        hexToIncidentsMap.getOrPut(hexKey) { mutableSetOf() }.add(incidentId)
+                        hexToIncidentsMap.getOrPut(hexId) { mutableSetOf() }.add(incidentId)
                     }
                 }
 
-                for ((hexKey, incidentIds) in hexToIncidentsMap) {
-                    val hexData = mapOf(
-                        "incidentIds" to incidentIds,
-                        "expiresAt" to expirationTime
-                    )
-                    allUpdates[hexKey] = objectMapper.writeValueAsString(hexData)
+                val hexIncidentFields = mutableMapOf<String, String>()
+                for ((hexId, incidentIds) in hexToIncidentsMap) {
+                    val hexData = mapOf("incidentIds" to incidentIds)
+                    hexIncidentFields[hexId] = objectMapper.writeValueAsString(hexData)
                 }
 
-                if (allUpdates.isNotEmpty()) {
-                    redisTemplate.opsForValue().multiSet(allUpdates)
-                }
+                hashSetWithTtl(INCIDENT_DETAIL_HASH_KEY, incidentDetailFields, ttlSeconds = 900)
+                hashSetWithTtl(HEX_INCIDENTS_HASH_KEY, hexIncidentFields, ttlSeconds = 900)
 
             } catch (e: Exception) {
                 e.printStackTrace()
